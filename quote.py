@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -73,7 +74,30 @@ def data_validade_str(dias: int) -> str:
     return dt.strftime("%d/%m/%Y")
 
 def latin1(s: str) -> str:
-    return s.encode("latin-1", "replace").decode("latin-1")
+    return (s or "").encode("latin-1", "replace").decode("latin-1")
+
+# >>> NOVO: quebra “suave” para tokens sem espaço (evita FPDFException)
+def soft_wrap(text: str, max_chunk: int = 40) -> str:
+    """
+    Insere espaços em tokens muito longos (sem whitespace) para permitir
+    quebra de linha no PDF. Mantém espaços existentes.
+    """
+    if not text:
+        return ""
+    out = []
+    # Mantém separadores (espaços, quebras) e tokens
+    for token in re.split(r'(\s+)', str(text)):
+        if not token:  # vazio
+            continue
+        if token.isspace():
+            out.append(token)
+            continue
+        # quebra tokens sem espaço em pedaços de max_chunk
+        while len(token) > max_chunk:
+            out.append(token[:max_chunk] + " ")
+            token = token[max_chunk:]
+        out.append(token)
+    return "".join(out)
 
 def init_state():
     # Carrinho e observações
@@ -278,14 +302,16 @@ def _pdf_add_logo_cover(pdf: FPDF):
     pdf.set_font("Helvetica", "B", 13)
     pdf.cell(0, 8, latin1("Dados do Orçamento"), ln=1)
     pdf.set_font("Helvetica", "", 11)
+
     cliente = st.session_state.cliente_nome or "(não informado)"
     contato = st.session_state.cliente_contato or "(não informado)"
     consultor = st.session_state.consultor_nome or "(não informado)"
     validade = f"{st.session_state.validade_dias} dias (até {data_validade_str(st.session_state.validade_dias)})"
-    pdf.multi_cell(0, 6, latin1(f"Cliente: {cliente}"))
-    pdf.multi_cell(0, 6, latin1(f"Contato: {contato}"))
-    pdf.multi_cell(0, 6, latin1(f"Consultor Tankar: {consultor}"))
-    pdf.multi_cell(0, 6, latin1(f"Validade do orçamento: {validade}"))
+
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Cliente: {cliente}")))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Contato: {contato}")))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Consultor Tankar: {consultor}")))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Validade do orçamento: {validade}")))
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 11)
     pdf.multi_cell(0, 6, latin1("Orçamento gerado automaticamente pelo sistema de propostas da Tankar IT Services."))
@@ -306,13 +332,13 @@ def gerar_pdf_final():
     pdf.set_font("Helvetica", "", 11)
     for idx, it in enumerate(st.session_state.itens, 1):
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 7, latin1(f"Item {idx}: {it['servico']}"), ln=1)
+        pdf.cell(0, 7, latin1(soft_wrap(f"Item {idx}: {it['servico']}")), ln=1)
         pdf.set_font("Helvetica", "", 11)
         desc = it.get("descricao", "-")
         det = it.get("detalhes", "-")
-        pdf.multi_cell(0, 6, latin1(f"Descrição/Resumo: {desc or '-'}"))
-        pdf.multi_cell(0, 6, latin1(f"Detalhes: {det or '-'}"))
-        pdf.multi_cell(0, 6, latin1(f"Subtotal: {format_brl(it['subtotal'])}"))
+        pdf.multi_cell(0, 6, latin1(soft_wrap(f"Descrição/Resumo: {desc or '-'}")))
+        pdf.multi_cell(0, 6, latin1(soft_wrap(f"Detalhes: {det or '-'}")))
+        pdf.multi_cell(0, 6, latin1(soft_wrap(f"Subtotal: {format_brl(it['subtotal'])}")))
         pdf.ln(1)
 
     # Observações gerais
@@ -320,22 +346,22 @@ def gerar_pdf_final():
     pdf.cell(0, 7, latin1("Informações gerais"), ln=1)
     pdf.set_font("Helvetica", "", 11)
     obs = st.session_state.observacoes_finais.strip() or "(sem observações)"
-    pdf.multi_cell(0, 6, latin1(obs))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(obs)))
     pdf.ln(1)
 
     # Totais com financeiros
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 7, latin1("Totais e Condições"), ln=1)
     pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 6, latin1(f"Subtotal itens: {format_brl(fin['subtotal'])}"))
-    pdf.multi_cell(0, 6, latin1(f"Despesas: {format_brl(fin['despesas'])}"))
-    pdf.multi_cell(0, 6, latin1(f"Impostos ({fin['impostos_pct']}%): {format_brl(fin['impostos_valor'])}"))
-    pdf.multi_cell(0, 6, latin1(f"Margem/Markup ({fin['margem_pct']}%): {format_brl(fin['margem_valor'])}"))
-    pdf.multi_cell(0, 6, latin1(f"TOTAL GERAL: {format_brl(fin['total'])}"))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Subtotal itens: {format_brl(fin['subtotal'])}")))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Despesas: {format_brl(fin['despesas'])}")))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Impostos ({fin['impostos_pct']}%): {format_brl(fin['impostos_valor'])}")))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"Margem/Markup ({fin['margem_pct']}%): {format_brl(fin['margem_valor'])}")))
+    pdf.multi_cell(0, 6, latin1(soft_wrap(f"TOTAL GERAL: {format_brl(fin['total'])}")))
     pdf.ln(2)
-    pdf.multi_cell(0, 6, latin1("- Itens com 'sob consulta' poderão sofrer alteração após análise técnica."))
-    pdf.multi_cell(0, 6, latin1("- Custos de transporte podem ser calculados separadamente quando aplicável."))
-    pdf.multi_cell(0, 6, latin1("- Validade conforme capa."))
+    pdf.multi_cell(0, 6, latin1("— Itens com 'sob consulta' poderão sofrer alteração após análise técnica."))
+    pdf.multi_cell(0, 6, latin1("— Custos de transporte podem ser calculados separadamente quando aplicável."))
+    pdf.multi_cell(0, 6, latin1("— Validade conforme capa."))
 
     return pdf.output(dest="S").encode("latin-1")
 
